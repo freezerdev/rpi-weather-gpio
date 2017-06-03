@@ -3,4 +3,4 @@
 #include "weatherdata.h"
 #include <time.h>
 
-void UpdateWU(const time_t nRaw, const CWeatherData &data);
+bool UpdateWU(const time_t nRaw, const CWeatherData &data);

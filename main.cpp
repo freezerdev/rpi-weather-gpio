@@ -10,14 +10,15 @@
 #include <wiringPi.h>
 #include <wiringPiI2C.h>
 
-void WriteToDB(const struct tm *pTime, const CWeatherData &data);
+void WriteToDB(const struct tm *pTime, CWeatherData &data);
 void WriteToHTML(const struct tm *pTime, const CWeatherData &data);
 
 //*****************************************************************************
 int main(void)
 {
-	unsigned int nPrevDay = 0;
+	int nPrevDay = 0;
 	int nPrevMin = -1;
+	unsigned long nWUCount = 0;
 
 	wiringPiSetupGpio();
 
@@ -29,7 +30,7 @@ int main(void)
 	while(1)
 	{
 		delay(10000);
-		time_t nRaw = time(NULL);
+		time_t nRaw = time(nullptr);
 		struct tm *pTime = localtime(&nRaw);
 
 		// The Raspberry Pi does not have an RTC, so if the time is before
@@ -53,6 +54,7 @@ int main(void)
 				data.SetWindSpeed(wind.GetWindSpeed());
 				data.SetWindGust(wind.GetWindGust());
 				data.SetWindDirection(wind.GetWindDirection());
+				data.SetRainMinute(rain.GetRainMinute());
 				data.SetRainHour(rain.GetRainHour());
 				data.SetRainDay(rain.GetRainDay());
 
@@ -63,7 +65,8 @@ int main(void)
 				WriteToHTML(pTime, data);
 
 				// Update weather underground
-				UpdateWU(nRaw, data);
+				if((nWUCount++ % 5) == 0)	// Only report every 5 minutes
+					UpdateWU(nRaw, data);
 			}
 		}
 	}
@@ -72,10 +75,12 @@ int main(void)
 }
 
 //*****************************************************************************
-void WriteToDB(const struct tm *pTime, const CWeatherData &data)
+void WriteToDB(const struct tm *pTime, CWeatherData &data)
 {
 	char szFilename[64];
 	sprintf(szFilename, "/home/pi/%d.sqlite", pTime->tm_year + 1900);
+
+	float fRainSeason = 0.0;
 
 	CSQLiteDB db;
 	if(db.Open(szFilename))
@@ -93,8 +98,13 @@ void WriteToDB(const struct tm *pTime, const CWeatherData &data)
 			"dewpoint REAL, "\
 			"PRIMARY KEY(time))");
 
+		db.ExecuteQuery("CREATE TABLE IF NOT EXISTS monthly_data ("\
+			"month INTEGER NOT NULL, "\
+			"raintotal REAL, "\
+			"PRIMARY KEY(month))");
+
 		char szQuery[256];
-		sprintf(szQuery, "insert into weather_data (time, temperature, pressure, humidity, windspeed, windgust, winddir, rainhour, rainday, dewpoint) "\
+		sprintf(szQuery, "insert or replace into weather_data (time, temperature, pressure, humidity, windspeed, windgust, winddir, rainhour, rainday, dewpoint) "\
 			"values(datetime(), '%f', '%f', '%f', '%f', '%f' , '%f', '%f', '%f', '%f')",
 			data.GetTemperature(),
 			data.GetPressure(),
@@ -107,8 +117,61 @@ void WriteToDB(const struct tm *pTime, const CWeatherData &data)
 			data.GetDewPoint());
 		db.ExecuteQuery(szQuery);
 
+		float fRainMonth = 0.0;
+		CSQLiteRecord rec;
+		sprintf(szQuery, "select raintotal from monthly_data where month = '%d'", pTime->tm_mon + 1);
+		if(db.OpenQuery(szQuery, rec))
+		{
+			rec.GetFloat<float>(0, fRainMonth);
+			rec.Close();
+		}
+		fRainMonth += data.GetRainMinute();
+
+		data.SetRainMonth(fRainMonth);
+
+		sprintf(szQuery, "insert or replace into monthly_data (month, raintotal) values('%d', '%f')", pTime->tm_mon + 1, fRainMonth);
+		db.ExecuteQuery(szQuery);
+
+		bool bResult = db.OpenQuery("select month, raintotal from monthly_data", rec);
+		while(bResult)
+		{
+			int nMonth;
+			rec.GetInteger<int>(0, nMonth);
+			if((pTime->tm_mon < 6 && nMonth <= 6) || (pTime->tm_mon >= 6 && nMonth > 6))
+			{
+				rec.GetFloat<float>(1, fRainMonth);
+				fRainSeason += fRainMonth;
+			}
+
+			bResult = rec.MoveNext();
+		}
+		rec.Close();
+
 		db.Close();
 	}
+
+	if(pTime->tm_mon < 6)
+	{
+		sprintf(szFilename, "/home/pi/%d.sqlite", pTime->tm_year + 1899);
+		if(db.Open(szFilename))
+		{
+			CSQLiteRecord rec;
+			bool bResult = db.OpenQuery("select month, raintotal from monthly_data where month > 6", rec);
+			while(bResult)
+			{
+				float fRainMonth;
+				rec.GetFloat<float>(1, fRainMonth);
+				fRainSeason += fRainMonth;
+
+				bResult = rec.MoveNext();
+			}
+			rec.Close();
+
+			db.Close();
+		}
+	}
+
+	data.SetRainSeason(fRainSeason);
 }
 
 //*****************************************************************************
@@ -130,6 +193,7 @@ void WriteToHTML(const struct tm *pTime, const CWeatherData &data)
 		fputs("<table border=0 cellspacing=5 witdh=100%>\n", pHtml);
 		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Date</td><td>%d-%d-%d</td></tr>\n", GetRowColor(nRow++), pTime->tm_year + 1900, pTime->tm_mon + 1, pTime->tm_mday);
 		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Time</td><td>%d:%02d:%02d %s</td></tr>\n", GetRowColor(nRow++), Get12Hour(pTime->tm_hour), pTime->tm_min, pTime->tm_sec, AmPm(pTime->tm_hour));
+		fputs("<tr><td>&nbsp;</td><td></td></tr>", pHtml);
 		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Temperature</td><td>%.2f&deg; F</td></tr>\n", GetRowColor(nRow++), data.GetTemperature());
 
 		if(data.IsValidDailyHighTemperature())
@@ -141,24 +205,25 @@ void WriteToHTML(const struct tm *pTime, const CWeatherData &data)
 		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Humidity</td><td>%.2f%%</td></tr>\n", GetRowColor(nRow++), data.GetHumidity());
 
 		if(data.IsValidDailyHighHumidity())
-			fprintf(pHtml, "<tr bgcolor=\"%s\"><td>&nbsp;&nbsp;&nbsp;&nbsp;Daily high humidity</td><td>%.2f%</td></tr>\n", GetRowColor(nRow++), data.GetDailyHighHumidity());
+			fprintf(pHtml, "<tr bgcolor=\"%s\"><td>&nbsp;&nbsp;&nbsp;&nbsp;Daily high humidity</td><td>%.2f%%</td></tr>\n", GetRowColor(nRow++), data.GetDailyHighHumidity());
 
 		if(data.IsValidDailyLowHumidity())
-			fprintf(pHtml, "<tr bgcolor=\"%s\"><td>&nbsp;&nbsp;&nbsp;&nbsp;Daily low humidity</td><td>%.2f%</td></tr>\n", GetRowColor(nRow++), data.GetDailyLowHumidity());
+			fprintf(pHtml, "<tr bgcolor=\"%s\"><td>&nbsp;&nbsp;&nbsp;&nbsp;Daily low humidity</td><td>%.2f%%</td></tr>\n", GetRowColor(nRow++), data.GetDailyLowHumidity());
 
 		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Pressure</td><td>%.2f in/Hg</td></tr>\n", GetRowColor(nRow++), data.GetPressure());
 		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Dew point</td><td>%.2f&deg; F</td></tr>\n", GetRowColor(nRow++), data.GetDewPoint());
+		fputs("<tr><td>&nbsp;</td><td></td></tr>", pHtml);
 		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Wind speed</td><td>%.2f MPH</td></tr>\n", GetRowColor(nRow++), data.GetWindSpeed());
 		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Wind gust</td><td>%.2f MPH</td></tr>\n", GetRowColor(nRow++), data.GetWindGust());
-
-		if(data.IsValidDailyHighWindGust())
-			fprintf(pHtml, "<tr bgcolor=\"%s\"><td>&nbsp;&nbsp;&nbsp;&nbsp;Daily high wind gust</td><td>%.2f MPH</td></tr>\n", GetRowColor(nRow++), data.GetDailyHighWindGust());
-
+		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>&nbsp;&nbsp;&nbsp;&nbsp;Daily high wind gust</td><td>%.2f MPH</td></tr>\n", GetRowColor(nRow++), data.GetDailyHighWindGust());
 		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Wind direction</td><td>%.2f&deg; (%s)</td></tr>\n", GetRowColor(nRow++), data.GetWindDirection(), CWindSensor::GetWindDirectionString(data.GetWindDirection()));
+		fputs("<tr><td>&nbsp;</td><td></td></tr>", pHtml);
 		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Rain hourly</td><td>%.2f in</td></tr>\n", GetRowColor(nRow++), data.GetRainHour());
 		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Rain daily</td><td>%.2f in</td></tr>\n", GetRowColor(nRow++), data.GetRainDay());
+		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Rain monthly</td><td>%.2f in</td></tr>\n", GetRowColor(nRow++), data.GetRainMonth());
+		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Rain season</td><td>%.2f in</td></tr>\n", GetRowColor(nRow++), data.GetRainSeason());
 		fputs("<tr><td>&nbsp;</td><td></td></tr>", pHtml);
-		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Raspberry Pi CPU</td><td>%.2f in</td></tr>\n", GetRowColor(nRow++), GetPiCpuTemperature());
+		fprintf(pHtml, "<tr bgcolor=\"%s\"><td>Raspberry Pi CPU</td><td>%.2f&deg; F</td></tr>\n", GetRowColor(nRow++), GetPiCpuTemperature());
 		fputs("</table>\n", pHtml);
 		fputs("</font>\n", pHtml);
 		fputs("</body>\n", pHtml);

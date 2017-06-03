@@ -43,7 +43,7 @@ public:
 	bool Open(PCSTR szFilename);
 	void Close(void);
 
-	bool IsOpen(void) const {return (m_pDB != NULL);}
+	bool IsOpen(void) const {return (m_pDB != nullptr);}
 
 	sqlite3 *GetDB(void) {return m_pDB;}
 
@@ -60,6 +60,8 @@ template <typename INTTYPE>
 bool CSQLiteRecord::GetInteger(const int nColumn, INTTYPE &nValue) const
 {
 	bool bSuccess = false;
+
+	nValue = 0;
 
 	if(m_pStatement && !m_bDone)
 	{

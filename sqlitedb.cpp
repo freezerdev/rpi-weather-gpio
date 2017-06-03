@@ -6,7 +6,7 @@
 
 //*****************************************************************************
 CSQLiteRecord::CSQLiteRecord(void)
-	: m_pStatement(NULL),
+	: m_pStatement(nullptr),
 	m_bDone(false)
 {
 }
@@ -23,7 +23,7 @@ void CSQLiteRecord::Close(void)
 	if(m_pStatement)
 	{
 		sqlite3_finalize(m_pStatement);
-		m_pStatement = NULL;
+		m_pStatement = nullptr;
 	}
 	m_bDone = false;
 }
@@ -51,7 +51,7 @@ bool CSQLiteRecord::MoveNext(void)
 
 //*****************************************************************************
 CSQLiteDB::CSQLiteDB(void)
-	: m_pDB(NULL)
+	: m_pDB(nullptr)
 {
 }
 
@@ -75,7 +75,7 @@ void CSQLiteDB::Close(void)
 	if(m_pDB)
 	{
 		sqlite3_close(m_pDB);
-		m_pDB = NULL;
+		m_pDB = nullptr;
 	}
 }
 

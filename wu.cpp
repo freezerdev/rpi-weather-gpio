@@ -13,13 +13,13 @@
 #define USER_AGENT	"Raspberry Pi"
 
 /*****************************************************************************/
-void Add(const unsigned int nIP, unsigned int **parrnIPs, unsigned short *pnIPCount)
+void Add(const unsigned int nIP, unsigned int *&pnIPs, unsigned short &nIPCount)
 {
 	bool bFound = false;
 	unsigned short n;
-	for(n = 0; n < *pnIPCount; ++n)
+	for(n = 0; n < nIPCount; ++n)
 	{
-		if(*parrnIPs[n] == nIP)
+		if(pnIPs[n] == nIP)
 		{
 			bFound = true;
 			break;
@@ -28,31 +28,31 @@ void Add(const unsigned int nIP, unsigned int **parrnIPs, unsigned short *pnIPCo
 
 	if(!bFound)
 	{
-		unsigned int *pTmp = (unsigned int*)malloc((*pnIPCount + 1) * sizeof(unsigned int));
+		unsigned int *pTmp = (unsigned int*)malloc((nIPCount + 1) * sizeof(unsigned int));
 		if(pTmp)
 		{
-			for(n = 0; n < *pnIPCount; ++n)
-				pTmp[n] = *parrnIPs[n];
+			for(n = 0; n < nIPCount; ++n)
+				pTmp[n] = pnIPs[n];
 
-			pTmp[*pnIPCount] = nIP;
-			if(*parrnIPs)
-				free(*parrnIPs);
-			*parrnIPs = pTmp;
-			++(*pnIPCount);
+			pTmp[nIPCount] = nIP;
+			if(pnIPs)
+				free(pnIPs);
+			pnIPs = pTmp;
+			++nIPCount;
 		}
 	}
 }
 
 /*****************************************************************************/
-void GetServerIPAddresses(const char *szServer, unsigned int **parrnIPs, unsigned short *pnIPCount)
+void GetServerIPAddresses(const char *szServer, unsigned int *&pnIPs, unsigned short &nIPCount)
 {
-	struct addrinfo aiHints = {0}, *paiResults = NULL;
-	if(getaddrinfo(szServer, NULL, &aiHints, &paiResults) == 0)
+	struct addrinfo aiHints = {0}, *paiResults = nullptr;
+	if(getaddrinfo(szServer, nullptr, &aiHints, &paiResults) == 0)
 	{
 		struct addrinfo *paiScan = paiResults;
 		while(paiScan)
 		{
-			Add(((struct sockaddr_in*)paiScan->ai_addr)->sin_addr.s_addr, parrnIPs, pnIPCount);
+			Add(((struct sockaddr_in*)paiScan->ai_addr)->sin_addr.s_addr, pnIPs, nIPCount);
 			paiScan = paiScan->ai_next;
 		}
 
@@ -61,12 +61,13 @@ void GetServerIPAddresses(const char *szServer, unsigned int **parrnIPs, unsigne
 }
 
 /*****************************************************************************/
-void UpdateWU(const time_t nRaw, const CWeatherData &data)
+bool UpdateWU(const time_t nRaw, const CWeatherData &data)
 {
-	unsigned int *arrnIPs = NULL;
+	bool bSuccess = false;
+	unsigned int *pnIPs = nullptr;
 	unsigned short nIPCount = 0;
 
-	GetServerIPAddresses(WU_SERVER, &arrnIPs, &nIPCount);
+	GetServerIPAddresses(WU_SERVER, pnIPs, nIPCount);
 	if(nIPCount)
 	{
 		struct sockaddr_in saiServer;
@@ -88,10 +89,8 @@ void UpdateWU(const time_t nRaw, const CWeatherData &data)
 			"dewptf=%.2f&"\
 			"windspeedmph=%.2f&"\
 			"windgustmph=%.2f&"\
-			"winddir=%.2f&"\
 			"rainin=%.2f&"\
-			"dailyrainin=%.2f&"\
-			"action=updateraw",
+			"dailyrainin=%.2f&",
 			WU_URL_BASE,
 			pTime->tm_year + 1900,
 			pTime->tm_mon + 1,
@@ -105,21 +104,34 @@ void UpdateWU(const time_t nRaw, const CWeatherData &data)
 			data.GetDewPoint(),
 			data.GetWindSpeed(),
 			data.GetWindGust(),
-			data.GetWindDirection(),
 			data.GetRainHour(),
 			data.GetRainDay());
 
+		if(data.GetWindSpeed() >= 3.0)
+		{
+			char szWindDir[64] = {0};
+			sprintf(szWindDir, "winddir=%.2f&", data.GetWindDirection());
+			strcat(szUrl, szWindDir);
+		}
+
+		strcat(szUrl, "action=updateraw");
 		sprintf(szQuery, "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: %s\r\n\r\n", szUrl, WU_SERVER, USER_AGENT);
 
 		for(unsigned short n = 0; n < nIPCount; ++n)
 		{
-			saiServer.sin_addr.s_addr = arrnIPs[n];
+			saiServer.sin_addr.s_addr = pnIPs[n];
 
 			int nSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 			if(nSocket != -1)
 			{
 				if(connect(nSocket, (struct sockaddr*)&saiServer, sizeof(saiServer)) != -1)
-					send(nSocket, szQuery, strlen(szQuery), 0);
+				{
+					if(send(nSocket, szQuery, strlen(szQuery), 0))
+					{
+						bSuccess = true;
+						break;
+					}
+				}
 
 				shutdown(nSocket, SHUT_RDWR);
 				close(nSocket);
@@ -127,6 +139,6 @@ void UpdateWU(const time_t nRaw, const CWeatherData &data)
 		}
 	}
 
-	if(arrnIPs)
-		free(arrnIPs);
+	if(pnIPs)
+		free(pnIPs);
 }

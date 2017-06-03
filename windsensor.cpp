@@ -22,7 +22,7 @@ unsigned int CWindSensor::s_nShortestGust = UINT_MAX;
 //*****************************************************************************
 CWindSensor::CWindSensor(void)
 {
-	pthread_mutex_init(&s_mutex, NULL);
+	pthread_mutex_init(&s_mutex, nullptr);
 
 	s_nPrevTimeSpeed = millis();
 

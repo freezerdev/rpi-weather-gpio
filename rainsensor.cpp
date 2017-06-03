@@ -5,13 +5,14 @@
 #define BUCKET_GPIO	17
 
 pthread_mutex_t CRainSensor::s_mutex;
+float CRainSensor::s_fRainMinute = 0.0;
 float CRainSensor::s_fRainDay = 0.0;
 std::list<unsigned int> CRainSensor::s_lstTipTimes;
 
 //*****************************************************************************
 CRainSensor::CRainSensor(void)
 {
-	pthread_mutex_init(&s_mutex, NULL);
+	pthread_mutex_init(&s_mutex, nullptr);
 
 	pinMode(BUCKET_GPIO, INPUT);
 	pullUpDnControl(BUCKET_GPIO, PUD_DOWN);
@@ -22,6 +23,21 @@ CRainSensor::CRainSensor(void)
 CRainSensor::~CRainSensor(void)
 {
 	pthread_mutex_destroy(&s_mutex);
+}
+
+//*****************************************************************************
+float CRainSensor::GetRainMinute(void)
+{
+	float fRainMinute;
+
+	pthread_mutex_lock(&s_mutex);
+
+	fRainMinute = s_fRainMinute;
+	s_fRainMinute = 0.0;
+
+	pthread_mutex_unlock(&s_mutex);
+
+	return fRainMinute;
 }
 
 //*****************************************************************************
@@ -69,7 +85,7 @@ float CRainSensor::GetRainDay(void)
 void CRainSensor::BucketCallback(void)
 {
 	static unsigned int nPrevCallbackTime = 0;
-	static unsigned int nPrevDay = 0;
+	static int nPrevDay = 0;
 
 	unsigned int nTimeNow = millis();
 
@@ -77,11 +93,13 @@ void CRainSensor::BucketCallback(void)
 	// event should be generated, so ignore events close together
 	if(nTimeNow - nPrevCallbackTime > 500)
 	{
-		time_t nRaw = time(NULL);
+		time_t nRaw = time(nullptr);
 		struct tm *pTime = localtime(&nRaw);
 
 		pthread_mutex_lock(&s_mutex);
 		s_lstTipTimes.push_back(nTimeNow);
+
+		s_fRainMinute += 0.011;
 
 		if(nPrevDay != pTime->tm_mday)
 			s_fRainDay = 0.0;

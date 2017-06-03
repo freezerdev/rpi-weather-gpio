@@ -25,11 +25,20 @@ public:
 	float GetWindDirection(void) const {return m_fWindDir;}
 	void SetWindDirection(const float fWindDir) {m_fWindDir = fWindDir;}
 
+	float GetRainMinute(void) const {return m_fRainMinute;}
+	void SetRainMinute(const float fRainMinute) {m_fRainMinute = fRainMinute;}
+
 	float GetRainHour(void) const {return m_fRainHour;}
 	void SetRainHour(const float fRainHour) {m_fRainHour = fRainHour;}
 
 	float GetRainDay(void) const {return m_fRainDay;}
 	void SetRainDay(const float fRainDay) {m_fRainDay = fRainDay;}
+
+	float GetRainMonth(void) const {return m_fRainMonth;}
+	void SetRainMonth(const float fRainMonth) {m_fRainMonth = fRainMonth;}
+
+	float GetRainSeason(void) const {return m_fRainSeason;}
+	void SetRainSeason(const float fRainSeason) {m_fRainSeason = fRainSeason;}
 
 	float GetDewPoint(void) const;
 
@@ -57,8 +66,11 @@ protected:
 	float m_fWindSpeed;
 	float m_fWindGust;
 	float m_fWindDir;
+	float m_fRainMinute;
 	float m_fRainHour;
 	float m_fRainDay;
+	float m_fRainMonth;
+	float m_fRainSeason;
 
 	float m_fTempDailyHigh;
 	float m_fTempDailyLow;
